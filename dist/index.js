@@ -82,11 +82,12 @@ var Trans = /** @class */ (function () {
     // init puppeteer instance pool
     Trans.prototype.init = function () {
         return __awaiter(this, void 0, void 0, function () {
-            var args, _loop_1, this_1, i;
+            var args, _loop_1, this_1, i, e_1;
             var _this = this;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
+                        _a.trys.push([0, 5, , 6]);
                         args = [
                             "--no-sandbox",
                             "--disable-setuid-sandbox",
@@ -157,7 +158,12 @@ var Trans = /** @class */ (function () {
                     case 3:
                         i++;
                         return [3 /*break*/, 1];
-                    case 4: return [2 /*return*/];
+                    case 4: return [3 /*break*/, 6];
+                    case 5:
+                        e_1 = _a.sent();
+                        console.log("[error] when init");
+                        return [2 /*return*/, Promise.resolve(-1)];
+                    case 6: return [2 /*return*/, Promise.resolve(0)];
                 }
             });
         });
@@ -165,10 +171,11 @@ var Trans = /** @class */ (function () {
     // clear google trans page
     Trans.prototype.clear = function (page) {
         return __awaiter(this, void 0, void 0, function () {
-            var source;
+            var source, e_2;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
+                        _a.trys.push([0, 10, , 11]);
                         page.trans = "";
                         page.msg = "";
                         return [4 /*yield*/, page.$("#source")];
@@ -198,17 +205,23 @@ var Trans = /** @class */ (function () {
                         _a.label = 9;
                     case 9:
                         page.from && console.timeEnd(page.from.times + " >>");
-                        return [2 /*return*/];
+                        return [3 /*break*/, 11];
+                    case 10:
+                        e_2 = _a.sent();
+                        console.log("[error] when clear");
+                        return [3 /*break*/, 11];
+                    case 11: return [2 /*return*/];
                 }
             });
         });
     };
     Trans.prototype.trans = function (msg) {
         return __awaiter(this, void 0, void 0, function () {
-            var pageObj, page, source, times, trans;
+            var pageObj, page, source, times, trans, e_3;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
+                        _a.trys.push([0, 11, , 12]);
                         pageObj = this.chromePool.pop();
                         if (!pageObj) {
                             console.log("overload return empty");
@@ -261,7 +274,7 @@ var Trans = /** @class */ (function () {
                         return [2 /*return*/, Promise.resolve(trans.substr(5))];
                     case 7:
                         times++;
-                        if (!(times >= 30)) return [3 /*break*/, 9];
+                        if (!(times >= 50)) return [3 /*break*/, 9];
                         return [4 /*yield*/, this.clear(page)];
                     case 8:
                         _a.sent();
@@ -269,7 +282,12 @@ var Trans = /** @class */ (function () {
                         console.log(pageObj.times + " >>" + "翻译超时");
                         return [2 /*return*/, Promise.resolve('')];
                     case 9: return [3 /*break*/, 4];
-                    case 10: return [2 /*return*/];
+                    case 10: return [3 /*break*/, 12];
+                    case 11:
+                        e_3 = _a.sent();
+                        console.log("[error] when trans action " + msg + " " + e_3.message);
+                        return [2 /*return*/, Promise.resolve('')];
+                    case 12: return [2 /*return*/];
                 }
             });
         });
