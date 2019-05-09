@@ -1,1 +1,6 @@
 gulpfile.js
+node_modules
+.idea
+.rpt2*
+src
+test
