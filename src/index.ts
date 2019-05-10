@@ -1,5 +1,5 @@
 "use strict"
-import {sleep} from "./util"
+import {sleep, log} from "./util"
 import * as puppeteer from 'puppeteer'
 const os = require("os")
 const platform: string = os.platform()
@@ -18,7 +18,9 @@ interface options {
     // puppeteer set proxy
     proxyServer?: string,
     // init puppeteer, goto new page timeout
-    initPageTimeout: number
+    initPageTimeout: number,
+    // max times puppeteer instance handle, over this quit create new one
+    maxTimesInstance: number,
 }
 
 interface page extends puppeteer.Page{
@@ -31,10 +33,16 @@ interface page extends puppeteer.Page{
 }
 
 interface pageWrap {
-    page: page,
-    times: number,
-
+    page: page
+    times: number
+    browser: puppeteer.Browser
+    instanceId: number
 }
+
+let instanceId: number = 1
+
+let repairing: boolean = false
+
 export default class Trans {
     // chrome instance pool
     private chromePool: pageWrap[] = []
@@ -58,55 +66,64 @@ export default class Trans {
         handles: true,
         executablePath: "",
         proxyServer: "",
-        initPageTimeout: 5000,
+        initPageTimeout: 0,
+        maxTimesInstance: 200,
     }
 
     constructor(options: options) {
         this.options = Object.assign(this.options, options)
     }
 
+    private async createPuppeteerInstance(): Promise<pageWrap> {
+        let args: string[] = [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+        ]
+        if (this.options.proxyServer) {
+            args.push(this.options.proxyServer)
+        }
+        let browser: puppeteer.Browser = await puppeteer.launch({
+            headless: this.options.handles,
+            executablePath: this.options.executablePath,
+            args: args
+        })
+
+        let page: page = await browser.newPage()
+        let pageWrap: pageWrap = {
+            page,
+            times: 0,
+            browser: browser,
+            instanceId: instanceId++
+        }
+        page.from = pageWrap
+        page.on('response', async response => {
+            const url = response.url()
+            console.log(pageWrap.times + " >> 请求url：" + url)
+
+            if (page.msg && url.indexOf(page.msg) != -1) {
+                let ret: string = await this.options.responseCb(response) || ""
+                page.trans = ret
+            }
+        })
+
+        if (this.options.transPageUrl) {
+            let opt: puppeteer.NavigationOptions = {}
+            if (this.options.initPageTimeout) {
+                opt.timeout = this.options.initPageTimeout
+            }
+            await page.goto(this.options.transPageUrl, opt)
+        }
+
+        log('[info]', 'create puppeteer instance', 'instanceid is', pageWrap.instanceId)
+        return Promise.resolve(pageWrap)
+    }
+
     // init puppeteer instance pool
     async init(): Promise<number> {
         try {
-            let args: string[] = [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-            ]
-            if (this.options.proxyServer) {
-                args.push(this.options.proxyServer)
-            }
             for (let i = 0; i < this.options.worker; i++) {
-                let browser: puppeteer.Browser = await puppeteer.launch({
-                    headless: this.options.handles,
-                    executablePath: this.options.executablePath,
-                    args: args
-                })
-
-                let page: page = await browser.newPage()
-                let pageWrap: pageWrap = {
-                    page,
-                    times: 0
-                }
-                page.from = pageWrap
-                page.on('response', async response => {
-                    const url = response.url()
-                    console.log(pageWrap.times + " >> 请求url：" + url)
-
-                    if (page.msg && url.indexOf(page.msg) != -1) {
-                        let ret: string = await this.options.responseCb(response) || ""
-                        page.trans = ret
-                    }
-                })
-
-                if (this.options.transPageUrl) {
-                    let opt: puppeteer.NavigationOptions = {}
-                    if (this.options.initPageTimeout) {
-                        opt.timeout = this.options.initPageTimeout
-                    }
-                    await page.goto(this.options.transPageUrl, opt)
-                }
-
-                this.chromePool.push(pageWrap)
+                let pageObj = await this.createPuppeteerInstance()
+                this.chromePool.push(pageObj)
             }
         } catch (e) {
             console.log(`[error] when init`)
@@ -138,13 +155,37 @@ export default class Trans {
         }
     }
 
+    private async recyclePageObj(pageObj: pageWrap) {
+        if (pageObj.times > this.options.maxTimesInstance) {
+            pageObj.browser.close()
+            let pageObjNew = await this.createPuppeteerInstance()
+            this.chromePool.unshift(pageObjNew)
+        } else {
+            this.chromePool.unshift(pageObj)
+        }
+    }
+
+    private async dynamicRepair() {
+        while (this.options.worker > this.chromePool.length) {
+            let instance = await this.createPuppeteerInstance()
+            this.chromePool.unshift(instance)
+        }
+    }
+
+
     public async trans(msg: string): Promise<string> {
         try {
             let pageObj: pageWrap | undefined = this.chromePool.pop()
             if (!pageObj) {
+                if (!repairing) {
+                    repairing = true
+                    await this.dynamicRepair()
+                    repairing = false
+                }
                 console.log("overload return empty")
                 return Promise.resolve("")
             }
+            log('[info]', 'get instance[', pageObj.instanceId, '] runing times[', pageObj.times, ']')
             pageObj.times++
             console.time(pageObj.times + " >>")
 
@@ -157,7 +198,7 @@ export default class Trans {
             console.log(pageObj.times + " >>" + `格式化之后：${msg}`)
 
             if (!msg) {
-                this.chromePool.push(pageObj)
+                await this.recyclePageObj(pageObj)
                 console.timeEnd(pageObj.times + " >>")
                 return Promise.resolve("")
             }
@@ -182,7 +223,7 @@ export default class Trans {
                 if (page.trans) {
                     const trans: string = page.trans
                     await this.clear(page)
-                    this.chromePool.push(pageObj)
+                    await this.recyclePageObj(pageObj)
 
                     console.log(pageObj.times + " >>" + "翻译结构：" + trans.substr(5))
                     return Promise.resolve(trans.substr(5))
@@ -190,7 +231,7 @@ export default class Trans {
                 times++
                 if (times >= 50) {
                     await this.clear(page)
-                    this.chromePool.push(pageObj)
+                    await this.recyclePageObj(pageObj)
 
                     console.log(pageObj.times + " >>" + "翻译超时")
                     return Promise.resolve('')

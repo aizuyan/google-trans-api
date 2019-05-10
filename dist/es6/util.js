@@ -5,4 +5,7 @@ async function sleep(duration) {
         }, duration);
     });
 }
-export { sleep };
+function log(...msgs) {
+    console.log(new Date(), ...msgs);
+}
+export { sleep, log };

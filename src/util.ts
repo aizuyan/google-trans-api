@@ -6,6 +6,11 @@ async function sleep(duration: number): Promise<undefined> {
     })
 }
 
+function log(...msgs) {
+    console.log(new Date(), ...msgs)
+}
+
 export {
-    sleep
+    sleep,
+    log
 }

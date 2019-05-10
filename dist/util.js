@@ -47,3 +47,11 @@ function sleep(duration) {
     });
 }
 exports.sleep = sleep;
+function log() {
+    var msgs = [];
+    for (var _i = 0; _i < arguments.length; _i++) {
+        msgs[_i] = arguments[_i];
+    }
+    console.log.apply(console, [new Date()].concat(msgs));
+}
+exports.log = log;
