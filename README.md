@@ -5,7 +5,8 @@ const koa = require('koa')
 const app = new koa()
 const router = require('koa-router')();
 const GoogleTrans = require('google-trans-api').default
-const chromePath = require("../config/chromePath");
+// 如果可以顺利下载puppeteer就不需要该配置
+const chromePath = '/path/to/puppeteer chrome'
 
 (async () => {
   let instance = new GoogleTrans({
