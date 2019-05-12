@@ -159,7 +159,9 @@ var Trans = /** @class */ (function () {
                             });
                         }); });
                         if (!this.options.transPageUrl) return [3 /*break*/, 4];
-                        opt = {};
+                        opt = {
+                            waitUntil: "domcontentloaded"
+                        };
                         if (this.options.initPageTimeout) {
                             opt.timeout = this.options.initPageTimeout;
                         }
@@ -303,7 +305,6 @@ var Trans = /** @class */ (function () {
             return __generator(this, function (_b) {
                 switch (_b.label) {
                     case 0:
-                        console.log(sourceResultsMap);
                         pageObj = this.chromePool.pop();
                         _b.label = 1;
                     case 1:
@@ -359,7 +360,7 @@ var Trans = /** @class */ (function () {
                         if (!sourceResultsMap[msg]) return [3 /*break*/, 12];
                         result = sourceResultsMap[msg][0];
                         console.log(pageObj.times + " >>" + "翻译结果：" + result);
-                        sourceResultsMap[msg] = null;
+                        delete sourceResultsMap[msg];
                         return [4 /*yield*/, this.clear(page)];
                     case 10:
                         _b.sent();

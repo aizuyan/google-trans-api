@@ -92,7 +92,9 @@ export default class Trans {
             sourceResultsMap[q] = [ret, new Date()];
         });
         if (this.options.transPageUrl) {
-            let opt = {};
+            let opt = {
+                waitUntil: "domcontentloaded"
+            };
             if (this.options.initPageTimeout) {
                 opt.timeout = this.options.initPageTimeout;
             }
@@ -164,7 +166,6 @@ export default class Trans {
      * @param msg
      */
     async trans(msg) {
-        console.log(sourceResultsMap);
         let pageObj = this.chromePool.pop();
         try {
             if (!pageObj) {
@@ -204,7 +205,7 @@ export default class Trans {
                 if (sourceResultsMap[msg]) {
                     let result = sourceResultsMap[msg][0];
                     console.log(pageObj.times + " >>" + "翻译结果：" + result);
-                    sourceResultsMap[msg] = null;
+                    delete sourceResultsMap[msg];
                     await this.clear(page);
                     await this.recyclePageObj(pageObj);
                     return Promise.resolve(result);
