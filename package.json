@@ -1,6 +1,6 @@
 {
   "name": "google-trans-api",
-  "version": "0.2.0",
+  "version": "0.2.4",
   "description": "use puppeteer to get google translate api",
   "main": "dist/index.js",
   "scripts": {

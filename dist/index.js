@@ -38,9 +38,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 var util_1 = require("./util");
 var puppeteer = require("puppeteer");
 var os = require("os");
+var url = require('url');
 var platform = os.platform();
 var instanceId = 1;
 var repairing = false;
+var sourceResultsMap = {};
+var OVERLOAD = 1000;
+var QUERY_MSG_EMPTY = 1001;
+var SOURCE_ELEMENT_GET_ERROR = 1002;
+var OVER_TIME = 1003;
 var Trans = /** @class */ (function () {
     function Trans(options) {
         var _this = this;
@@ -73,6 +79,10 @@ var Trans = /** @class */ (function () {
                     }
                 });
             }); },
+            regExpIncludeUrl: function (url) {
+                var reg = new RegExp("translate.google.cn/translate_a/single.*?q=.*");
+                return reg.test(url);
+            },
             transPageUrl: "https://translate.google.cn/#auto/zh-CN",
             handles: true,
             executablePath: "",
@@ -82,6 +92,16 @@ var Trans = /** @class */ (function () {
         };
         this.options = Object.assign(this.options, options);
     }
+    /**
+     * get param q from original url
+     *
+     * @param urlStr
+     */
+    Trans.prototype.getQueryFromUrl = function (urlStr) {
+        var query = url.parse(urlStr).query;
+        var q = query.q || "";
+        return q;
+    };
     Trans.prototype.createPuppeteerInstance = function () {
         return __awaiter(this, void 0, void 0, function () {
             var args, browser, page, pageWrap, opt;
@@ -114,19 +134,27 @@ var Trans = /** @class */ (function () {
                         };
                         page.from = pageWrap;
                         page.on('response', function (response) { return __awaiter(_this, void 0, void 0, function () {
-                            var url, ret;
+                            var url, q, ret;
                             return __generator(this, function (_a) {
                                 switch (_a.label) {
                                     case 0:
                                         url = response.url();
-                                        console.log(pageWrap.times + " >> 请求url：" + url);
-                                        if (!(page.msg && url.indexOf(page.msg) != -1)) return [3 /*break*/, 2];
+                                        util_1.log("[info] request url " + url);
+                                        if (this.options.regExpIncludeUrl &&
+                                            typeof (this.options.regExpIncludeUrl) === "function" &&
+                                            !this.options.regExpIncludeUrl(url)) {
+                                            return [2 /*return*/, true];
+                                        }
+                                        q = this.getQueryFromUrl(url);
+                                        if (!q) {
+                                            return [2 /*return*/, true];
+                                        }
                                         return [4 /*yield*/, this.options.responseCb(response)];
                                     case 1:
                                         ret = (_a.sent()) || "";
-                                        page.trans = ret;
-                                        _a.label = 2;
-                                    case 2: return [2 /*return*/];
+                                        // save to the global var, ret is result, new Date is the record date, to clear
+                                        sourceResultsMap[q] = [ret, new Date()];
+                                        return [2 /*return*/];
                                 }
                             });
                         }); });
@@ -244,6 +272,9 @@ var Trans = /** @class */ (function () {
             });
         });
     };
+    /**
+     * supplement puppeteer instance when not enough
+     */
     Trans.prototype.dynamicRepair = function () {
         return __awaiter(this, void 0, void 0, function () {
             var instance;
@@ -261,26 +292,32 @@ var Trans = /** @class */ (function () {
             });
         });
     };
+    /**
+     * trans func, called by api
+     *
+     * @param msg
+     */
     Trans.prototype.trans = function (msg) {
         return __awaiter(this, void 0, void 0, function () {
-            var pageObj, page, source, times, trans, e_3;
-            return __generator(this, function (_a) {
-                switch (_a.label) {
+            var pageObj, page, source, times, result, e_3, message, _a;
+            return __generator(this, function (_b) {
+                switch (_b.label) {
                     case 0:
-                        _a.trys.push([0, 18, , 19]);
+                        console.log(sourceResultsMap);
                         pageObj = this.chromePool.pop();
-                        if (!!pageObj) return [3 /*break*/, 3];
-                        if (!!repairing) return [3 /*break*/, 2];
+                        _b.label = 1;
+                    case 1:
+                        _b.trys.push([1, 14, , 22]);
+                        if (!!pageObj) return [3 /*break*/, 4];
+                        if (!!repairing) return [3 /*break*/, 3];
                         repairing = true;
                         return [4 /*yield*/, this.dynamicRepair()];
-                    case 1:
-                        _a.sent();
-                        repairing = false;
-                        _a.label = 2;
                     case 2:
-                        console.log("overload return empty");
-                        return [2 /*return*/, Promise.resolve("")];
-                    case 3:
+                        _b.sent();
+                        repairing = false;
+                        _b.label = 3;
+                    case 3: throw OVERLOAD;
+                    case 4:
                         util_1.log('[info]', 'get instance[', pageObj.instanceId, '] runing times[', pageObj.times, ']');
                         pageObj.times++;
                         console.time(pageObj.times + " >>");
@@ -290,65 +327,83 @@ var Trans = /** @class */ (function () {
                             msg = msg.replace(/(\n)/g, "");
                         }
                         console.log(pageObj.times + " >>" + ("\u683C\u5F0F\u5316\u4E4B\u540E\uFF1A" + msg));
-                        if (!!msg) return [3 /*break*/, 5];
-                        return [4 /*yield*/, this.recyclePageObj(pageObj)];
-                    case 4:
-                        _a.sent();
-                        console.timeEnd(pageObj.times + " >>");
-                        return [2 /*return*/, Promise.resolve("")];
-                    case 5:
+                        if (!msg) {
+                            throw QUERY_MSG_EMPTY;
+                        }
                         page = pageObj.page;
-                        page.msg = encodeURIComponent(msg);
+                        // type source info to the textarea
                         return [4 /*yield*/, page.waitFor("#source")];
-                    case 6:
-                        _a.sent();
+                    case 5:
+                        // type source info to the textarea
+                        _b.sent();
                         return [4 /*yield*/, page.$("#source")];
-                    case 7:
-                        source = _a.sent();
+                    case 6:
+                        source = _b.sent();
                         if (!source) {
-                            console.log(pageObj.times + " >>" + "\u83B7\u53D6\u5143\u7D20\u7126\u70B9\u5931\u8D25");
-                            return [2 /*return*/, Promise.resolve("")];
+                            throw SOURCE_ELEMENT_GET_ERROR;
                         }
                         source.focus();
-                        return [4 /*yield*/, page.keyboard.type(msg)];
-                    case 8:
-                        _a.sent();
+                        return [4 /*yield*/, page.keyboard.type(msg)
+                            // wait for result or error
+                        ];
+                    case 7:
+                        _b.sent();
                         times = 0;
-                        _a.label = 9;
-                    case 9:
-                        if (!true) return [3 /*break*/, 17];
+                        _b.label = 8;
+                    case 8:
+                        if (!true) return [3 /*break*/, 13];
+                        console.log(sourceResultsMap, msg);
                         console.log(pageObj.times + " >>" + new Date());
                         return [4 /*yield*/, util_1.sleep(300)];
+                    case 9:
+                        _b.sent();
+                        if (!sourceResultsMap[msg]) return [3 /*break*/, 12];
+                        result = sourceResultsMap[msg][0];
+                        console.log(pageObj.times + " >>" + "翻译结果：" + result);
+                        //sourceResultsMap[msg] = null
+                        return [4 /*yield*/, this.clear(page)];
                     case 10:
-                        _a.sent();
-                        if (!page.trans) return [3 /*break*/, 13];
-                        trans = page.trans;
-                        return [4 /*yield*/, this.clear(page)];
+                        //sourceResultsMap[msg] = null
+                        _b.sent();
+                        return [4 /*yield*/, this.recyclePageObj(pageObj)];
                     case 11:
-                        _a.sent();
-                        return [4 /*yield*/, this.recyclePageObj(pageObj)];
+                        _b.sent();
+                        return [2 /*return*/, Promise.resolve(result)];
                     case 12:
-                        _a.sent();
-                        console.log(pageObj.times + " >>" + "翻译结构：" + trans.substr(5));
-                        return [2 /*return*/, Promise.resolve(trans.substr(5))];
-                    case 13:
                         times++;
-                        if (!(times >= 50)) return [3 /*break*/, 16];
-                        return [4 /*yield*/, this.clear(page)];
+                        if (times >= 50) {
+                            throw OVER_TIME;
+                        }
+                        return [3 /*break*/, 8];
+                    case 13: return [3 /*break*/, 22];
                     case 14:
-                        _a.sent();
-                        return [4 /*yield*/, this.recyclePageObj(pageObj)];
-                    case 15:
-                        _a.sent();
+                        e_3 = _b.sent();
+                        message = e_3.message;
+                        _a = message;
+                        switch (_a) {
+                            case OVERLOAD: return [3 /*break*/, 15];
+                            case QUERY_MSG_EMPTY: return [3 /*break*/, 16];
+                            case SOURCE_ELEMENT_GET_ERROR: return [3 /*break*/, 18];
+                            case OVER_TIME: return [3 /*break*/, 19];
+                        }
+                        return [3 /*break*/, 20];
+                    case 15: return [2 /*return*/, Promise.resolve(OVERLOAD)];
+                    case 16: return [4 /*yield*/, this.recyclePageObj(pageObj)];
+                    case 17:
+                        _b.sent();
+                        console.timeEnd(pageObj.times + " >>");
+                        return [2 /*return*/, Promise.resolve(QUERY_MSG_EMPTY)];
+                    case 18:
+                        console.log(pageObj.times + " >>" + "\u83B7\u53D6\u5143\u7D20\u7126\u70B9\u5931\u8D25");
+                        return [2 /*return*/, Promise.resolve(SOURCE_ELEMENT_GET_ERROR)];
+                    case 19:
                         console.log(pageObj.times + " >>" + "翻译超时");
                         return [2 /*return*/, Promise.resolve('')];
-                    case 16: return [3 /*break*/, 9];
-                    case 17: return [3 /*break*/, 19];
-                    case 18:
-                        e_3 = _a.sent();
-                        console.log("[error] when trans action " + msg + " " + e_3.message);
+                    case 20:
+                        util_1.log("[error]", pageObj.instanceId, e_3);
                         return [2 /*return*/, Promise.resolve('')];
-                    case 19: return [2 /*return*/];
+                    case 21: return [3 /*break*/, 22];
+                    case 22: return [2 /*return*/];
                 }
             });
         });

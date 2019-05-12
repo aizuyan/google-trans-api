@@ -2,6 +2,7 @@
 import {sleep, log} from "./util"
 import * as puppeteer from 'puppeteer'
 const os = require("os")
+const url = require('url')
 const platform: string = os.platform()
 
 interface options {
@@ -9,6 +10,8 @@ interface options {
     worker: number,
     // intercept reponse callback
     responseCb: (response: puppeteer.Response) => Promise<string>,
+    // include response url
+    regExpIncludeUrl: (url: string) => Boolean,
     // translate page url
     transPageUrl?: string,
     // chrome instance show
@@ -43,6 +46,13 @@ let instanceId: number = 1
 
 let repairing: boolean = false
 
+let sourceResultsMap: {[source: string]: any[]} = {}
+
+const OVERLOAD: number                  = 1000
+const QUERY_MSG_EMPTY: number           = 1001
+const SOURCE_ELEMENT_GET_ERROR: number  = 1002
+const OVER_TIME: number                 = 1003
+
 export default class Trans {
     // chrome instance pool
     private chromePool: pageWrap[] = []
@@ -62,6 +72,10 @@ export default class Trans {
             }
             return Promise.resolve("")
         },
+        regExpIncludeUrl: url => {
+            const reg: RegExp = new RegExp("translate.google.cn/translate_a/single.*?q=.*")
+            return reg.test(url)
+        },
         transPageUrl: "https://translate.google.cn/#auto/zh-CN",
         handles: true,
         executablePath: "",
@@ -72,6 +86,17 @@ export default class Trans {
 
     constructor(options: options) {
         this.options = Object.assign(this.options, options)
+    }
+
+    /**
+     * get param q from original url
+     *
+     * @param urlStr
+     */
+    private getQueryFromUrl(urlStr: string): string {
+        let query = url.parse(urlStr, true).query
+        let q = query.q || ""
+        return q
     }
 
     private async createPuppeteerInstance(): Promise<pageWrap> {
@@ -98,12 +123,24 @@ export default class Trans {
         page.from = pageWrap
         page.on('response', async response => {
             const url = response.url()
-            console.log(pageWrap.times + " >> 请求url：" + url)
-
-            if (page.msg && url.indexOf(page.msg) != -1) {
-                let ret: string = await this.options.responseCb(response) || ""
-                page.trans = ret
+            log(`[info] request url ${url}`)
+            if (
+                this.options.regExpIncludeUrl &&
+                typeof(this.options.regExpIncludeUrl) === "function" &&
+                !this.options.regExpIncludeUrl(url)
+            ) {
+                return true
             }
+
+            const q = this.getQueryFromUrl(url)
+            if (!q) {
+                return true
+            }
+
+            let ret: string = await this.options.responseCb(response) || ""
+
+            // save to the global var, ret is result, new Date is the record date, to clear
+            sourceResultsMap[q] = [ret, new Date()]
         })
 
         if (this.options.transPageUrl) {
@@ -165,6 +202,9 @@ export default class Trans {
         }
     }
 
+    /**
+     * supplement puppeteer instance when not enough
+     */
     private async dynamicRepair() {
         while (this.options.worker > this.chromePool.length) {
             let instance = await this.createPuppeteerInstance()
@@ -172,23 +212,27 @@ export default class Trans {
         }
     }
 
-
-    public async trans(msg: string): Promise<string> {
+    /**
+     * trans func, called by api
+     *
+     * @param msg
+     */
+    public async trans(msg: string): Promise<string|number> {
+        console.log(sourceResultsMap)
+        let pageObj: pageWrap | undefined = this.chromePool.pop()
         try {
-            let pageObj: pageWrap | undefined = this.chromePool.pop()
             if (!pageObj) {
                 if (!repairing) {
                     repairing = true
                     await this.dynamicRepair()
                     repairing = false
                 }
-                console.log("overload return empty")
-                return Promise.resolve("")
+                throw OVERLOAD
             }
             log('[info]', 'get instance[', pageObj.instanceId, '] runing times[', pageObj.times, ']')
+
             pageObj.times++
             console.time(pageObj.times + " >>")
-
             console.log(pageObj.times + " >>" + `开始翻译：${msg}`)
             msg = msg.trim()
 
@@ -198,48 +242,58 @@ export default class Trans {
             console.log(pageObj.times + " >>" + `格式化之后：${msg}`)
 
             if (!msg) {
-                await this.recyclePageObj(pageObj)
-                console.timeEnd(pageObj.times + " >>")
-                return Promise.resolve("")
+                throw QUERY_MSG_EMPTY
             }
 
             let page: page = pageObj.page
-            page.msg = encodeURIComponent(msg)
+
+            // type source info to the textarea
             await page.waitFor("#source")
             let source: puppeteer.ElementHandle | null = await page.$("#source")
-
             if (!source) {
-                console.log(pageObj.times + " >>" + `获取元素焦点失败`)
-                return Promise.resolve("")
+                throw SOURCE_ELEMENT_GET_ERROR
             }
-
             source.focus()
             await page.keyboard.type(msg)
 
+            // wait for result or error
             let times: number = 0
             while (true) {
+                console.log(sourceResultsMap, msg)
                 console.log(pageObj.times + " >>" + new Date())
                 await sleep(300)
-                if (page.trans) {
-                    const trans: string = page.trans
+                if (sourceResultsMap[msg]) {
+                    let result = sourceResultsMap[msg][0]
+                    console.log(pageObj.times + " >>" + "翻译结果：" + result)
+                    sourceResultsMap[msg] = null
                     await this.clear(page)
                     await this.recyclePageObj(pageObj)
-
-                    console.log(pageObj.times + " >>" + "翻译结构：" + trans.substr(5))
-                    return Promise.resolve(trans.substr(5))
+                    return Promise.resolve(result)
                 }
                 times++
                 if (times >= 50) {
-                    await this.clear(page)
-                    await this.recyclePageObj(pageObj)
-
-                    console.log(pageObj.times + " >>" + "翻译超时")
-                    return Promise.resolve('')
+                    throw OVER_TIME
                 }
             }
         } catch (e) {
-            console.log(`[error] when trans action ${msg} ${e.message}`)
-            return Promise.resolve('')
+            const message = e.message
+            switch (message) {
+                case OVERLOAD:
+                    return Promise.resolve(OVERLOAD)
+                case QUERY_MSG_EMPTY:
+                    await this.recyclePageObj(pageObj)
+                    console.timeEnd(pageObj.times + " >>")
+                    return Promise.resolve(QUERY_MSG_EMPTY)
+                case SOURCE_ELEMENT_GET_ERROR:
+                    console.log(pageObj.times + " >>" + `获取元素焦点失败`)
+                    return Promise.resolve(SOURCE_ELEMENT_GET_ERROR)
+                case OVER_TIME:
+                    console.log(pageObj.times + " >>" + "翻译超时")
+                    return Promise.resolve('')
+                default:
+                    log(`[error]`, pageObj.instanceId, e)
+                    return Promise.resolve('')
+            }
         }
     }
 }

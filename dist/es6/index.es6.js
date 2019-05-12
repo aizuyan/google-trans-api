@@ -2,9 +2,15 @@
 import { sleep, log } from "./util";
 import * as puppeteer from 'puppeteer';
 const os = require("os");
+const url = require('url');
 const platform = os.platform();
 let instanceId = 1;
 let repairing = false;
+let sourceResultsMap = {};
+const OVERLOAD = 1000;
+const QUERY_MSG_EMPTY = 1001;
+const SOURCE_ELEMENT_GET_ERROR = 1002;
+const OVER_TIME = 1003;
 export default class Trans {
     constructor(options) {
         // chrome instance pool
@@ -25,6 +31,10 @@ export default class Trans {
                 }
                 return Promise.resolve("");
             },
+            regExpIncludeUrl: url => {
+                const reg = new RegExp("translate.google.cn/translate_a/single.*?q=.*");
+                return reg.test(url);
+            },
             transPageUrl: "https://translate.google.cn/#auto/zh-CN",
             handles: true,
             executablePath: "",
@@ -33,6 +43,16 @@ export default class Trans {
             maxTimesInstance: 200,
         };
         this.options = Object.assign(this.options, options);
+    }
+    /**
+     * get param q from original url
+     *
+     * @param urlStr
+     */
+    getQueryFromUrl(urlStr) {
+        let query = url.parse(urlStr).query;
+        let q = query.q || "";
+        return q;
     }
     async createPuppeteerInstance() {
         let args = [
@@ -57,11 +77,19 @@ export default class Trans {
         page.from = pageWrap;
         page.on('response', async (response) => {
             const url = response.url();
-            console.log(pageWrap.times + " >> 请求url：" + url);
-            if (page.msg && url.indexOf(page.msg) != -1) {
-                let ret = await this.options.responseCb(response) || "";
-                page.trans = ret;
+            log(`[info] request url ${url}`);
+            if (this.options.regExpIncludeUrl &&
+                typeof (this.options.regExpIncludeUrl) === "function" &&
+                !this.options.regExpIncludeUrl(url)) {
+                return true;
             }
+            const q = this.getQueryFromUrl(url);
+            if (!q) {
+                return true;
+            }
+            let ret = await this.options.responseCb(response) || "";
+            // save to the global var, ret is result, new Date is the record date, to clear
+            sourceResultsMap[q] = [ret, new Date()];
         });
         if (this.options.transPageUrl) {
             let opt = {};
@@ -121,23 +149,31 @@ export default class Trans {
             this.chromePool.unshift(pageObj);
         }
     }
+    /**
+     * supplement puppeteer instance when not enough
+     */
     async dynamicRepair() {
         while (this.options.worker > this.chromePool.length) {
             let instance = await this.createPuppeteerInstance();
             this.chromePool.unshift(instance);
         }
     }
+    /**
+     * trans func, called by api
+     *
+     * @param msg
+     */
     async trans(msg) {
+        console.log(sourceResultsMap);
+        let pageObj = this.chromePool.pop();
         try {
-            let pageObj = this.chromePool.pop();
             if (!pageObj) {
                 if (!repairing) {
                     repairing = true;
                     await this.dynamicRepair();
                     repairing = false;
                 }
-                console.log("overload return empty");
-                return Promise.resolve("");
+                throw OVERLOAD;
             }
             log('[info]', 'get instance[', pageObj.instanceId, '] runing times[', pageObj.times, ']');
             pageObj.times++;
@@ -149,43 +185,56 @@ export default class Trans {
             }
             console.log(pageObj.times + " >>" + `格式化之后：${msg}`);
             if (!msg) {
-                await this.recyclePageObj(pageObj);
-                console.timeEnd(pageObj.times + " >>");
-                return Promise.resolve("");
+                throw QUERY_MSG_EMPTY;
             }
             let page = pageObj.page;
-            page.msg = encodeURIComponent(msg);
+            // type source info to the textarea
             await page.waitFor("#source");
             let source = await page.$("#source");
             if (!source) {
-                console.log(pageObj.times + " >>" + `获取元素焦点失败`);
-                return Promise.resolve("");
+                throw SOURCE_ELEMENT_GET_ERROR;
             }
             source.focus();
             await page.keyboard.type(msg);
+            // wait for result or error
             let times = 0;
             while (true) {
+                console.log(sourceResultsMap, msg);
                 console.log(pageObj.times + " >>" + new Date());
                 await sleep(300);
-                if (page.trans) {
-                    const trans = page.trans;
+                if (sourceResultsMap[msg]) {
+                    let result = sourceResultsMap[msg][0];
+                    console.log(pageObj.times + " >>" + "翻译结果：" + result);
+                    //sourceResultsMap[msg] = null
                     await this.clear(page);
                     await this.recyclePageObj(pageObj);
-                    console.log(pageObj.times + " >>" + "翻译结构：" + trans.substr(5));
-                    return Promise.resolve(trans.substr(5));
+                    return Promise.resolve(result);
                 }
                 times++;
                 if (times >= 50) {
-                    await this.clear(page);
-                    await this.recyclePageObj(pageObj);
-                    console.log(pageObj.times + " >>" + "翻译超时");
-                    return Promise.resolve('');
+                    throw OVER_TIME;
                 }
             }
         }
         catch (e) {
-            console.log(`[error] when trans action ${msg} ${e.message}`);
-            return Promise.resolve('');
+            const message = e.message;
+            switch (message) {
+                case OVERLOAD:
+                    return Promise.resolve(OVERLOAD);
+                case QUERY_MSG_EMPTY:
+                    await this.recyclePageObj(pageObj);
+                    console.timeEnd(pageObj.times + " >>");
+                    return Promise.resolve(QUERY_MSG_EMPTY);
+                case SOURCE_ELEMENT_GET_ERROR:
+                    console.log(pageObj.times + " >>" + `获取元素焦点失败`);
+                    return Promise.resolve(SOURCE_ELEMENT_GET_ERROR);
+                case OVER_TIME:
+                    console.log(pageObj.times + " >>" + "翻译超时");
+                    return Promise.resolve('');
+                default:
+                    log(`[error]`, pageObj.instanceId, e);
+                    return Promise.resolve('');
+            }
         }
     }
 }
