@@ -50,7 +50,7 @@ export default class Trans {
      * @param urlStr
      */
     getQueryFromUrl(urlStr) {
-        let query = url.parse(urlStr).query;
+        let query = url.parse(urlStr, true).query;
         let q = query.q || "";
         return q;
     }
@@ -199,13 +199,12 @@ export default class Trans {
             // wait for result or error
             let times = 0;
             while (true) {
-                console.log(sourceResultsMap, msg);
                 console.log(pageObj.times + " >>" + new Date());
                 await sleep(300);
                 if (sourceResultsMap[msg]) {
                     let result = sourceResultsMap[msg][0];
                     console.log(pageObj.times + " >>" + "翻译结果：" + result);
-                    //sourceResultsMap[msg] = null
+                    sourceResultsMap[msg] = null;
                     await this.clear(page);
                     await this.recyclePageObj(pageObj);
                     return Promise.resolve(result);

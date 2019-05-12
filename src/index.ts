@@ -259,7 +259,6 @@ export default class Trans {
             // wait for result or error
             let times: number = 0
             while (true) {
-                console.log(sourceResultsMap, msg)
                 console.log(pageObj.times + " >>" + new Date())
                 await sleep(300)
                 if (sourceResultsMap[msg]) {

@@ -1,6 +1,6 @@
 {
   "name": "google-trans-api",
-  "version": "0.2.4",
+  "version": "1.0.0",
   "description": "use puppeteer to get google translate api",
   "main": "dist/index.js",
   "scripts": {
@@ -23,6 +23,11 @@
     "mocha": "^6.1.4",
     "typescript": "^3.4.5"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aizuyan/google-trans-api.git"
+  },
+  "homepage": "https://github.com/aizuyan/google-trans-api",
   "dependencies": {
     "puppeteer": "^1.15.0"
   }

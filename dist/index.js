@@ -98,7 +98,7 @@ var Trans = /** @class */ (function () {
      * @param urlStr
      */
     Trans.prototype.getQueryFromUrl = function (urlStr) {
-        var query = url.parse(urlStr).query;
+        var query = url.parse(urlStr, true).query;
         var q = query.q || "";
         return q;
     };
@@ -352,7 +352,6 @@ var Trans = /** @class */ (function () {
                         _b.label = 8;
                     case 8:
                         if (!true) return [3 /*break*/, 13];
-                        console.log(sourceResultsMap, msg);
                         console.log(pageObj.times + " >>" + new Date());
                         return [4 /*yield*/, util_1.sleep(300)];
                     case 9:
@@ -360,10 +359,9 @@ var Trans = /** @class */ (function () {
                         if (!sourceResultsMap[msg]) return [3 /*break*/, 12];
                         result = sourceResultsMap[msg][0];
                         console.log(pageObj.times + " >>" + "翻译结果：" + result);
-                        //sourceResultsMap[msg] = null
+                        sourceResultsMap[msg] = null;
                         return [4 /*yield*/, this.clear(page)];
                     case 10:
-                        //sourceResultsMap[msg] = null
                         _b.sent();
                         return [4 /*yield*/, this.recyclePageObj(pageObj)];
                     case 11:
